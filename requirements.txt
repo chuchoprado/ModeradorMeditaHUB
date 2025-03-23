@@ -66,3 +66,8 @@ uvicorn
 google-api-python-client==2.116.0
 gunicorn
 SpeechRecognition
+google-auth 
+google-api-python-client
+speechrecognition
+apscheduler 
+pytz
