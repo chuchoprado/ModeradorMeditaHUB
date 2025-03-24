@@ -6,6 +6,7 @@ import json
 import logging
 import openai
 import time
+import re
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.constants import ChatAction
@@ -50,6 +51,12 @@ def convertOgaToWav(oga_path, wav_path):
     except Exception as e:
         logger.error("Error converting audio file: " + str(e))
         return False
+
+def clean_response(response: str) -> str:
+    """
+    Elimina patrones que empiecen con "【" y terminen con "†source】"
+    """
+    return re.sub(r'【.*?†source】', '', response)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -264,11 +271,13 @@ class CoachBot:
                     response = await self.process_product_query(chat_id, user_message)
                     self.save_conversation(chat_id, "user", user_message)
                     self.save_conversation(chat_id, "assistant", response)
+                    response = clean_response(response)
                     return response
                 response = await self.send_message_to_assistant(chat_id, user_message)
                 if not response.strip():
                     logger.error("⚠️ OpenAI devolvió una respuesta vacía.")
                     return "⚠️ No obtuve una respuesta válida del asistente. Intenta de nuevo."
+                response = clean_response(response)
                 self.save_conversation(chat_id, "user", user_message)
                 self.save_conversation(chat_id, "assistant", response)
                 return response
