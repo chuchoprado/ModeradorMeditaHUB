@@ -21,6 +21,8 @@ from gtts import gTTS
 from pydub import AudioSegment
 import tempfile
 import subprocess
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import pytz
 
 def extract_product_keywords(query: str) -> str:
     """
@@ -78,7 +80,6 @@ class CoachBot:
         self.client = AsyncOpenAI(api_key=required_env_vars['OPENAI_API_KEY'])
         self.sheets_service = None
         self.started = False
-        # Se eliminan las verificaciones de email, acceso libre
         self.conversation_history = {}
         self.user_threads = {}
         self.pending_requests = set()
@@ -106,7 +107,6 @@ class CoachBot:
     def _init_db(self):
         with closing(sqlite3.connect(self.db_path)) as conn:
             cursor = conn.cursor()
-            # Se elimina la tabla de usuarios ya que no se realiza validación de email
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS conversations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,7 +247,6 @@ class CoachBot:
 
     async def process_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_message: str) -> str:
         chat_id = update.message.chat.id
-        # Obtener o crear un lock específico para este chat
         lock = self.locks.setdefault(chat_id, asyncio.Lock())
         async with lock:
             try:
@@ -454,7 +453,6 @@ class CoachBot:
     async def async_init(self):
         try:
             await self.telegram_app.initialize()
-            # Ya no se carga la verificación de usuarios, acceso libre
             if not self.started:
                 self.started = True
                 await self.telegram_app.start()
@@ -466,7 +464,6 @@ class CoachBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             chat_id = update.message.chat.id
-            # Acceso libre: se saluda siempre sin validación
             await update.message.reply_text("👋 ¡Bienvenido! ¿En qué puedo ayudarte hoy?")
             logger.info(f"Comando /start ejecutado por chat_id: {chat_id}")
         except Exception as e:
@@ -497,7 +494,6 @@ class CoachBot:
 
     async def route_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
-            # Acceso libre: se procesa el mensaje directamente
             await self.handle_message(update, context)
         except Exception as e:
             logger.error(f"Error en route_message: {e}")
@@ -547,14 +543,29 @@ class CoachBot:
             temp_path = os.path.join(temp_dir, temp_filename)
             tts = gTTS(text=text, lang='es')
             tts.save(temp_path)
-            if speed != 1.3:
+            if speed != 1.0:
                 song = AudioSegment.from_mp3(temp_path)
                 new_song = song.speedup(playback_speed=speed)
                 new_song.export(temp_path, format="mp3")
             return temp_path
         except Exception as e:
-            print(f"Error en text_to_speech: {e}")
+            logger.error(f"Error en text_to_speech: {e}")
             return None
+
+# Función para enviar el mensaje diario
+async def send_daily_message():
+    try:
+        # La variable GROUP_CHAT_ID debe estar definida en el entorno
+        chat_id = os.getenv("GROUP_CHAT_ID")
+        if not chat_id:
+            logger.error("GROUP_CHAT_ID no está definido en las variables de entorno.")
+            return
+        # Genera o usa un mensaje predefinido; puedes adaptar esto para generar contenido dinámico
+        message = "¡Buenos días, equipo! Recuerden que cada día es una nueva oportunidad para alcanzar sus metas. ¡A por ello!"
+        await bot.telegram_app.bot.send_message(chat_id=int(chat_id), text=message)
+        logger.info(f"Mensaje diario enviado correctamente a chat_id: {chat_id}")
+    except Exception as e:
+        logger.error("Error enviando mensaje diario: " + str(e))
 
 try:
     bot = CoachBot()
@@ -567,6 +578,17 @@ async def startup_event():
     try:
         await bot.async_init()
         logger.info("Aplicación iniciada correctamente")
+        # Inicializa el scheduler para tareas asíncronas
+        scheduler = AsyncIOScheduler()
+        # Programa el envío diario a las 8:00 AM hora de Florida (Eastern Time)
+        scheduler.add_job(
+            send_daily_message,
+            'cron',
+            hour=8,
+            minute=0,
+            timezone=pytz.timezone('America/New_York')
+        )
+        scheduler.start()
     except Exception as e:
         logger.error("❌ Error al iniciar la aplicación: " + str(e))
 
@@ -575,7 +597,6 @@ async def webhook(request: Request):
     try:
         data = await request.json()
         update = Update.de_json(data, bot.telegram_app.bot)
-        # Se invoca directamente el procesamiento del update
         await bot.telegram_app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
